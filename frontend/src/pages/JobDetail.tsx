@@ -1,0 +1,39 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, ArrowUpRight, Bookmark, BriefcaseBusiness, CalendarDays, CheckCircle2, Clock3, ExternalLink, MapPin, Sparkles } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
+import { applicationApi, jobApi } from '../api/jobs'
+import { errorMessage } from '../api/client'
+import { Button, ErrorState, LoadingState } from '../components/Ui'
+
+export function JobDetail() {
+  const id = Number(useParams().id)
+  const queryClient = useQueryClient()
+  const job = useQuery({ queryKey: ['job', id], queryFn: () => jobApi.get(id), enabled: Number.isFinite(id) })
+  const applications = useQuery({ queryKey: ['applications'], queryFn: applicationApi.list })
+  const saved = useQuery({ queryKey: ['saved-jobs'], queryFn: jobApi.saved })
+  const alreadySaved = saved.data?.some(item => item.id === id) || false
+  const currentApplication = applications.data?.find(item => item.jobId === id)
+  const save = useMutation({ mutationFn: async () => { if (alreadySaved) await jobApi.unsave(id); else await jobApi.save(id) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-jobs'] }) })
+  const apply = useMutation({ mutationFn: () => applicationApi.create(id, 'APPLIED'), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['applications'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }) } })
+  if (job.isPending) return <LoadingState label="Loading job details…" />
+  if (job.isError) return <ErrorState error={job.error} retry={() => void job.refetch()} />
+  const item = job.data
+  const experience = item.requiredExperienceMin == null ? 'Not specified' : item.requiredExperienceMax == null ? `${item.requiredExperienceMin}+ years` : `${item.requiredExperienceMin}–${item.requiredExperienceMax} years`
+  const salary = item.salaryMin != null || item.salaryMax != null ? `${item.salaryCurrency || ''} ${item.salaryMin?.toLocaleString() || '—'} – ${item.salaryMax?.toLocaleString() || '—'} / ${item.salaryInterval?.toLowerCase() || 'period not listed'}` : 'Not provided by source'
+  const date = (value: string | null) => value ? new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'Not provided'
+  return <>
+    <Link to="/search" className="mb-5 inline-flex items-center gap-2 text-xs font-bold text-muted hover:text-forest"><ArrowLeft size={15} />Back to search</Link>
+    <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+      <main className="space-y-5">
+        <section className="rounded-2xl border border-line bg-white p-5 sm:p-7"><div className="flex items-start gap-4"><div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-mint font-display text-lg font-extrabold uppercase text-forest">{item.companyName.slice(0, 2)}</div><div className="min-w-0 flex-1"><h1 className="font-display text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">{item.title}</h1><p className="mt-1 font-semibold text-slate-600">{item.companyName}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted"><span className="inline-flex items-center gap-1"><MapPin size={14} />{[item.location, item.countryCode].filter(Boolean).join(', ') || 'Location not listed'}</span><span className="inline-flex items-center gap-1"><BriefcaseBusiness size={14} />{item.employmentType?.replaceAll('_', ' ') || 'Employment not listed'}</span><span className="inline-flex items-center gap-1"><Clock3 size={14} />{experience}</span></div></div>{item.match && <span title="An estimate of profile fit, not hiring probability" className="inline-flex shrink-0 items-center gap-1 rounded-full bg-mint px-3 py-2 text-xs font-bold text-forest"><Sparkles size={14} />{Math.round(item.match.scorePercent)}%</span>}</div>
+          <div className="mt-6 flex flex-wrap gap-2"><a href={item.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-forest px-4 py-2.5 text-sm font-bold text-white hover:bg-[#294dca]">Apply on company website <ExternalLink size={15} /></a><Button type="button" variant="secondary" onClick={() => save.mutate()} disabled={save.isPending}><Bookmark size={15} />{alreadySaved ? 'Saved' : 'Save job'}</Button><Button type="button" variant="secondary" onClick={() => apply.mutate()} disabled={apply.isPending || currentApplication?.status === 'APPLIED'}><CheckCircle2 size={15} />{currentApplication?.status === 'APPLIED' ? 'Marked applied' : 'Mark as applied'}</Button></div>
+          {(save.isError || apply.isError) && <p role="alert" className="mt-3 text-sm text-rose-700">{errorMessage(save.error || apply.error)}</p>}
+        </section>
+        <section className="rounded-2xl border border-line bg-white p-5 sm:p-7"><h2 className="font-display text-lg font-extrabold text-ink">Job description</h2>{item.description ? <div className="mt-4 whitespace-pre-line text-sm leading-7 text-slate-600">{item.description}</div> : <p className="mt-4 text-sm text-muted">The source did not provide a description in the listing data. Open the original posting for details.</p>}</section>
+        <section className="rounded-2xl border border-line bg-white p-5 sm:p-7"><h2 className="font-display text-lg font-extrabold text-ink">Skills and qualifications</h2><p className="mt-1 text-xs text-muted">Skills below were detected in the source listing.</p><div className="mt-4"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">Required skills</p><div className="mt-2 flex flex-wrap gap-2">{item.requiredSkills.length ? item.requiredSkills.map(skill => <span key={skill} className="rounded-lg bg-mint px-3 py-1.5 text-xs font-semibold text-forest">{skill}</span>) : <span className="text-sm text-muted">Not listed</span>}</div></div><div className="mt-5"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">Preferred skills</p><div className="mt-2 flex flex-wrap gap-2">{item.additionalSkills.length ? item.additionalSkills.map(skill => <span key={skill} className="rounded-lg bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">{skill}</span>) : <span className="text-sm text-muted">Not listed</span>}</div></div></section>
+      </main>
+      <aside className="space-y-4"><section className="rounded-2xl border border-line bg-white p-5"><h2 className="font-display text-base font-extrabold text-ink">Listing details</h2><dl className="mt-4 space-y-4 text-xs"><div><dt className="text-muted">Salary</dt><dd className="mt-1 font-semibold text-ink">{salary}</dd></div><div><dt className="text-muted">Work mode</dt><dd className="mt-1 font-semibold capitalize text-ink">{item.workplaceType?.toLowerCase() || 'Not specified'}</dd></div><div><dt className="text-muted">Posted</dt><dd className="mt-1 font-semibold text-ink">{date(item.postedAt)}</dd></div><div><dt className="text-muted">Last verified</dt><dd className="mt-1 inline-flex items-center gap-1 font-semibold text-ink"><CalendarDays size={13} />{date(item.lastVerifiedAt)}</dd></div><div><dt className="text-muted">Source</dt><dd className="mt-1"><a href={item.sourceAttributionUrl || item.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-forest hover:underline">{item.source} <ArrowUpRight size={13} /></a></dd></div></dl></section>
+        {item.match && <section className="rounded-2xl border border-forest/10 bg-mint/60 p-5"><p className="flex items-center gap-2 text-sm font-extrabold text-ink"><Sparkles size={16} className="text-forest" />Estimated profile fit</p><p className="mt-2 text-xs leading-5 text-slate-600">{item.match.explanation} {item.match.missingSkills.length ? `Skills to build: ${item.match.missingSkills.join(', ')}.` : ''}</p><p className="mt-3 text-[10px] text-muted">This estimate is not a hiring probability.</p></section>}</aside>
+    </div>
+  </>
+}
